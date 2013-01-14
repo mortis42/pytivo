@@ -35,6 +35,7 @@ PUSHED = '<h3>Queued for Push to %s</h3> <p>%s</p>'
 def tmpl(name):
     return file(os.path.join(SCRIPTDIR, 'templates', name), 'rb').read()
 
+HTML_CONTAINER_TEMPLATE_MOBILE = tmpl('container_mob.tmpl')
 HTML_CONTAINER_TEMPLATE = tmpl('container_html.tmpl')
 XML_CONTAINER_TEMPLATE = tmpl('container_xml.tmpl')
 TVBUS_TEMPLATE = tmpl('TvBus.tmpl')
@@ -70,6 +71,13 @@ class Pushable(object):
         file_info = VideoDetails()
         file_info['valid'] = transcode.supported_format(f['path'])
 
+        temp_share = config.get_server('temp_share', '')
+        temp_share_path = ''
+        if temp_share:
+            for name, data in config.getShares():
+                if temp_share == name:
+                    temp_share_path = data.get('path')
+
         mime = 'video/mpeg'
         if config.isHDtivo(f['tsn']):
             for m in ['video/mp4', 'video/bif']:
@@ -79,10 +87,15 @@ class Pushable(object):
 
             if (mime == 'video/mpeg' and
                 transcode.mp4_remuxable(f['path'], f['tsn'])):
-                new_path = transcode.mp4_remux(f['path'], f['name'], f['tsn'])
+                new_path = transcode.mp4_remux(f['path'], f['name'], f['tsn'], temp_share_path)
                 if new_path:
                     mime = 'video/mp4'
                     f['name'] = new_path
+                    if temp_share_path:
+                        ip = config.get_ip()
+                        port = config.getPort()
+                        container = quote(temp_share) + '/'
+                        f['url'] = 'http://%s:%s/%s' % (ip, port, container)
 
         if file_info['valid']:
             file_info.update(self.metadata_full(f['path'], f['tsn'], mime))
@@ -406,6 +419,7 @@ class BaseVideo(Plugin):
     def QueryContainer(self, handler, query):
         tsn = handler.headers.getheader('tsn', '')
         subcname = query['Container'][0]
+        useragent = handler.headers.getheader('User-Agent', '')
 
         if not self.get_local_path(handler, query):
             handler.send_error(404)
@@ -464,10 +478,16 @@ class BaseVideo(Plugin):
 
             videos.append(video)
 
+        logger.debug('mobileagent: %d useragent: %s' % (useragent.lower().find('mobile'), useragent.lower()))
+        use_mobile = useragent.lower().find('mobile') > 0
         if use_html:
-            t = Template(HTML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
+            if use_mobile:
+                t = Template(HTML_CONTAINER_TEMPLATE_MOBILE, filter=EncodeUnicode)
+            else:
+                t = Template(HTML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
         else:
             t = Template(XML_CONTAINER_TEMPLATE, filter=EncodeUnicode)
+
         t.container = handler.cname
         t.name = subcname
         t.total = total

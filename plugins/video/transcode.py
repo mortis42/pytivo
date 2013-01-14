@@ -271,6 +271,8 @@ def select_audioch(inFile, tsn):
     if video_info(inFile)['aCh'] > 6:
         debug('Too many audio channels for AC-3, using 5.1 instead')
         return '-ac 6'
+    elif video_info(inFile)['aCh']:
+        return '-ac %i' % video_info(inFile)['aCh']
     return ''
 
 def select_audiolang(inFile, tsn):
@@ -717,9 +719,14 @@ def mp4_remuxable(inFile, tsn=''):
     vInfo = video_info(inFile)
     return tivo_compatible_video(vInfo, tsn, 'video/mp4')[0]
 
-def mp4_remux(inFile, basename, tsn=''):
+def mp4_remux(inFile, basename, tsn='', temp_share_path=''):
     outFile = inFile + '.pyTivo-temp'
     newname = basename + '.pyTivo-temp'
+
+    if temp_share_path:
+        newname = os.path.splitext(os.path.split(basename)[1])[0] + '.mp4.pyTivo-temp'
+        outFile = os.path.join(temp_share_path, newname)
+
     if os.path.exists(outFile):
         return None  # ugh!
 
