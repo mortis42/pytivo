@@ -1,0 +1,3 @@
+[submodule "plugins/dvdvideo"]
+	path = plugins/dvdvideo
+	url = git://repo.or.cz/pyTivo_dvdvideo.git
