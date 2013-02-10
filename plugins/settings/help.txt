@@ -420,12 +420,13 @@ Skill: Advanced
 Description: Sets the number of audio channels used by ffmpeg. ffmpeg
 will retain the same number of channels as the source file by default.
 The default setting should work fine for most transfers unless the
-default audio_codec is changed. Change this setting to 2 if you do not
-want to retain 5.1 audio. A bug in ffmpeg will sometimes move the center
-audio channel to the left or right speaker. Setting this option to 2, on
-an as needed basis, or permanently, will correct this at the loss of 5.1
-audio. But this should only be necessary on rare occasions where the
-source file is an mkv or xvid with ac3 5.1 audio bitrate above 448k.
+default audio_codec is changed. 
+Change this setting to 2 if you do not want to retain 5.1 audio. A bug
+in ffmpeg will sometimes move the center audio channel to the left or
+right speaker. Setting this option to 2, on an as needed basis, or
+permanently, will correct this at the loss of 5.1 audio. But this should
+only be necessary on rare occasions where the source file is an mkv or
+xvid with ac3 5.1 audio bitrate above 448k.
 Example Settings: 2, 6
 Available In: Tivos, HD_tivos, SD_tivos
 
