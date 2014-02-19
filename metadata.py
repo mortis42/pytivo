@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
+import hashlib
 import logging
 import os
+import struct
 import subprocess
 import sys
 from datetime import datetime
@@ -17,6 +19,7 @@ from lrucache import LRUCache
 
 import config
 import plugins.video.transcode
+import turing
 
 # Something to strip
 TRIBUNE_CR = ' Copyright Tribune Media Services, Inc.'
@@ -396,7 +399,7 @@ def from_container(xmldoc):
 def from_details(xml):
     metadata = {}
 
-    xmldoc = minidom.parse(xml)
+    xmldoc = minidom.parseString(xml)
     showing = xmldoc.getElementsByTagName('showing')[0]
     program = showing.getElementsByTagName('program')[0]
 
@@ -641,6 +644,47 @@ def from_nfo(full_path):
     nfo_cache[full_path] = metadata
     return metadata
 
+def _tdcat_bin(tdcat_path, full_path, tivo_mak):
+    fname = unicode(full_path, 'utf-8')
+    if mswindows:
+        fname = fname.encode('iso8859-1')
+    tcmd = [tdcat_path, '-m', tivo_mak, '-2', fname]
+    tdcat = subprocess.Popen(tcmd, stdout=subprocess.PIPE)
+    return tdcat.stdout.read()
+
+def _tdcat_py(full_path, tivo_mak):
+    xml_data = {}
+
+    tfile = open(full_path, 'rb')
+    header = tfile.read(16)
+    offset, chunks = struct.unpack('>LH', header[10:])
+    rawdata = tfile.read(offset - 16)
+    tfile.close()
+
+    count = 0
+    for i in xrange(chunks):
+        chunk_size, data_size, id, enc = struct.unpack('>LLHH',
+            rawdata[count:count + 12])
+        count += 12
+        data = rawdata[count:count + data_size]
+        xml_data[id] = {'enc': enc, 'data': data, 'start': count + 16}
+        count += chunk_size - 12
+
+    chunk = xml_data[2]
+    details = chunk['data']
+    if chunk['enc']:
+        xml_key = xml_data[3]['data']
+
+        hexmak = hashlib.md5('tivo:TiVo DVR:' + tivo_mak).hexdigest()
+        key = hashlib.sha1(hexmak + xml_key).digest()[:16] + '\0\0\0\0'
+
+        turkey = hashlib.sha1(key[:17]).digest()
+        turiv = hashlib.sha1(key).digest()
+
+        details = turing.Turing(turkey, turiv).crypt(details, chunk['start'])
+
+    return details
+
 def from_tivo(full_path):
     if full_path in tivo_cache:
         return tivo_cache[full_path]
@@ -648,13 +692,12 @@ def from_tivo(full_path):
     tdcat_path = config.get_bin('tdcat')
     tivo_mak = config.get_server('tivo_mak')
     try:
-        assert(tdcat_path and tivo_mak)
-        fname = unicode(full_path, 'utf-8')
-        if mswindows:
-            fname = fname.encode('iso8859-1')
-        tcmd = [tdcat_path, '-m', tivo_mak, '-2', fname]
-        tdcat = subprocess.Popen(tcmd, stdout=subprocess.PIPE)
-        metadata = from_details(tdcat.stdout)
+        assert(tivo_mak)
+        if tdcat_path:
+            details = _tdcat_bin(tdcat_path, full_path, tivo_mak)
+        else:
+            details = _tdcat_py(full_path, tivo_mak)
+        metadata = from_details(details)
         tivo_cache[full_path] = metadata
     except:
         metadata = {}

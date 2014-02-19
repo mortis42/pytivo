@@ -23,6 +23,11 @@ SCRIPTDIR = os.path.dirname(__file__)
 
 CLASS_NAME = 'ToGo'
 
+# Characters to remove from filenames
+
+BADCHAR = {'\\': '-', '/': '-', ':': ' -', ';': ',', '*': '.',
+           '?': '.', '!': '.', '"': "'", '<': '(', '>': ')', '|': ' '}
+
 # Some error/status message templates
 
 MISSING = """<h3>Missing Data</h3> <p>You must set both "tivo_mak" and 
@@ -40,14 +45,11 @@ from the queue.</p>"""
 UNABLE = """<h3>Unable to Connect to TiVo</h3> <p>pyTivo was unable to 
 connect to the TiVo at %s.</p> <p>This is most likely caused by an 
 incorrect Media Access Key. Please return to the Settings page and 
-double check your <b>tivo_mak</b> setting.</p>"""
+double check your <b>tivo_mak</b> setting.</p> <pre>%s</pre>"""
 
 # Preload the templates
-def tmpl(name):
-    return file(os.path.join(SCRIPTDIR, 'templates', name), 'rb').read()
-
-CONTAINER_TEMPLATE_MOBILE = tmpl('npl_mob.tmpl')
-CONTAINER_TEMPLATE = tmpl('npl.tmpl')
+tnname = os.path.join(SCRIPTDIR, 'templates', 'npl.tmpl')
+NPL_TEMPLATE = file(tnname, 'rb').read()
 
 status = {} # Global variable to control download threads
 tivo_cache = {} # Cache of TiVo NPL
@@ -80,22 +82,28 @@ class ToGo(Plugin):
                     time.sleep(5)
                     continue
 
-                # Throw the error otherwise
+                # Log and throw the error otherwise
+                logger.error(e)
                 raise
 
     def NPL(self, handler, query):
+
+        def getint(thing):
+            try:
+                result = int(thing)
+            except:
+                result = 0
+            return result
+
         global basic_meta
         shows_per_page = 50 # Change this to alter the number of shows returned
         folder = ''
+        FirstAnchor = ''
         has_tivodecode = bool(config.get_bin('tivodecode'))
 
         if 'TiVo' in query:
             tivoIP = query['TiVo'][0]
             tsn = config.tivos_by_ip(tivoIP)
-
-            togo_mpegts = config.is_ts_capable(tsn)
-            useragent = handler.headers.getheader('User-Agent', '')
-
             tivo_name = config.tivo_names[tsn]
             tivo_mak = config.get_tsn('tivo_mak', tsn)
             theurl = ('https://' + tivoIP +
@@ -116,7 +124,7 @@ class ToGo(Plugin):
                 try:
                     page = self.tivo_open(theurl)
                 except IOError, e:
-                    handler.redir(UNABLE % tivoIP, 10)
+                    handler.redir(UNABLE % (tivoIP, e), 10)
                     return
                 tivo_cache[theurl] = {'thepage': minidom.parse(page),
                                       'thepage_time': time.time()}
@@ -127,8 +135,9 @@ class ToGo(Plugin):
             TotalItems = tag_data(xmldoc, 'TiVoContainer/Details/TotalItems')
             ItemStart = tag_data(xmldoc, 'TiVoContainer/ItemStart')
             ItemCount = tag_data(xmldoc, 'TiVoContainer/ItemCount')
-            FirstAnchor = tag_data(items[0], 'Links/Content/Url')
             title = tag_data(xmldoc, 'TiVoContainer/Details/Title')
+            if items:
+                FirstAnchor = tag_data(items[0], 'Links/Content/Url')
 
             data = []
             for item in items:
@@ -160,7 +169,7 @@ class ToGo(Plugin):
                     rawsize = entry['SourceSize']
                     entry['SourceSize'] = metadata.human_size(rawsize)
 
-                    dur = int(entry['Duration']) / 1000
+                    dur = getint(entry['Duration']) / 1000
                     entry['Duration'] = ( '%d:%02d:%02d' %
                         (dur / 3600, (dur % 3600) / 60, dur % 60) )
 
@@ -182,13 +191,9 @@ class ToGo(Plugin):
             TotalItems = 0
             ItemStart = 0
             ItemCount = 0
-            FirstAnchor = ''
             title = ''
 
-        if useragent.lower().find('mobile') > 0:
-            t = Template(CONTAINER_TEMPLATE_MOBILE, filter=EncodeUnicode)
-        else:
-            t = Template(CONTAINER_TEMPLATE, filter=EncodeUnicode)
+        t = Template(NPL_TEMPLATE, filter=EncodeUnicode)
         t.escape = escape
         t.quote = quote
         t.folder = folder
@@ -196,15 +201,15 @@ class ToGo(Plugin):
         if tivoIP in queue:
             t.queue = queue[tivoIP]
         t.has_tivodecode = has_tivodecode
-        t.togo_mpegts = togo_mpegts
+        t.togo_mpegts = config.is_ts_capable(tsn)
         t.tname = tivo_name
         t.tivoIP = tivoIP
         t.container = handler.cname
         t.data = data
         t.len = len
-        t.TotalItems = int(TotalItems)
-        t.ItemStart = int(ItemStart)
-        t.ItemCount = int(ItemCount)
+        t.TotalItems = getint(TotalItems)
+        t.ItemStart = getint(ItemStart)
+        t.ItemCount = getint(ItemCount)
         t.FirstAnchor = quote(FirstAnchor)
         t.shows_per_page = shows_per_page
         t.title = title
@@ -218,17 +223,30 @@ class ToGo(Plugin):
 
         name = unquote(parse_url[2])[10:].split('.')
         id = unquote(parse_url[4]).split('id=')[1]
-        name.insert(-1, ' - ' + id + '.')
+        ts = status[url]['ts_format']
+        name.insert(-1, ' - ' + id)
         if status[url]['decode']:
-            name[-1] = 'mpg'
-        outfile = os.path.join(togo_path, ''.join(name))
+            if ts:
+                name[-1] = 'ts'
+            else:
+                name[-1] = 'mpg'
+        else:
+            if ts:
+                name.insert(-1, ' (TS)')
+            else:
+                name.insert(-1, ' (PS)')
+        name.insert(-1, '.')
+        name = ''.join(name)
+        for ch in BADCHAR:
+            name = name.replace(ch, BADCHAR[ch])
+        outfile = os.path.join(togo_path, name)
 
         if status[url]['save']:
             meta = basic_meta[url]
             details_url = 'https://%s/TiVoVideoDetails?id=%s' % (tivoIP, id)
             try:
                 handle = self.tivo_open(details_url)
-                meta.update(metadata.from_details(handle))
+                meta.update(metadata.from_details(handle.read()))
                 handle.close()
             except:
                 pass
@@ -239,18 +257,12 @@ class ToGo(Plugin):
         auth_handler.add_password('TiVo DVR', url, 'tivo', mak)
         try:
             if status[url]['ts_format']:
-                handle = self.tivo_open('%s&Format=video/x-tivo-mpeg-ts' % url)
+                handle = self.tivo_open(url + '&Format=video/x-tivo-mpeg-ts')
             else:
                 handle = self.tivo_open(url)
-        except urllib2.HTTPError, e:
+        except Exception, msg:
             status[url]['running'] = False
-            status[url]['error'] = e.code
-            logger.error(e.code)
-            return
-        except urllib2.URLError, e:
-            status[url]['running'] = False
-            status[url]['error'] = e.reason
-            logger.error(e.reason)
+            status[url]['error'] = str(msg)
             return
 
         tivo_name = config.tivo_names[config.tivos_by_ip(tivoIP)]
@@ -336,7 +348,8 @@ class ToGo(Plugin):
             for theurl in urls:
                 status[theurl] = {'running': False, 'error': '', 'rate': '',
                                   'queued': True, 'size': 0, 'finished': False,
-                                  'decode': decode, 'save': save, 'ts_format' : ts_format}
+                                  'decode': decode, 'save': save,
+                                  'ts_format': ts_format}
                 if tivoIP in queue:
                     queue[tivoIP].append(theurl)
                 else:

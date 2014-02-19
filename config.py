@@ -4,11 +4,14 @@ import logging
 import logging.config
 import os
 import re
-import random
 import socket
-import string
 import sys
+import uuid
 from ConfigParser import NoOptionError
+
+class Bdict(dict):
+    def getboolean(self, x):
+        return self.get(x, 'False').lower() in ('1', 'yes', 'true', 'on')
 
 def init(argv):
     global tivos
@@ -18,7 +21,7 @@ def init(argv):
 
     tivos = {}
     tivo_names = {}
-    guid = ''.join([random.choice(string.ascii_letters) for i in range(10)])
+    guid = uuid.uuid4()
 
     config_win_default = ''
     if sys.platform == "win32":
@@ -93,7 +96,7 @@ def get_server(name, default=None):
         return default
 
 def getGUID():
-    return guid
+    return str(guid)
 
 def get_ip(tsn=None):
     dest_ip = tivos.get(tsn, '4.2.2.1')
@@ -172,12 +175,10 @@ def isTsnInConfig(tsn):
     return ('_tivo_' + tsn) in config.sections()
 
 def getShares(tsn=''):
-    shares = [(section, dict(config.items(section)))
+    shares = [(section, Bdict(config.items(section)))
               for section in config.sections()
-              if not (section.startswith('_tivo_')
-                      or section.startswith('logger_')
-                      or section.startswith('handler_')
-                      or section.startswith('formatter_')
+              if not (section.startswith(('_tivo_', 'logger_', 'handler_',
+                                          'formatter_'))
                       or section in ('Server', 'loggers', 'handlers',
                                      'formatters')
               )
@@ -190,7 +191,7 @@ def getShares(tsn=''):
         for x in config.get(tsnsect, 'shares').split(','):
             y = x.strip()
             if config.has_section(y):
-                tsnshares.append((y, dict(config.items(y))))
+                tsnshares.append((y, Bdict(config.items(y))))
         shares = tsnshares
 
     shares.sort()
@@ -205,7 +206,7 @@ def getShares(tsn=''):
 def getDebug():
     try:
         return config.getboolean('Server', 'debug')
-    except NoOptionError, ValueError:
+    except:
         return False
 
 def getOptres(tsn=None):
@@ -275,7 +276,7 @@ def isHDtivo(tsn):  # tsn's of High Definition Tivo's
 def has_ts_flag():
     try:
         return config.getboolean('Server', 'ts')
-    except NoOptionError, ValueError:
+    except:
         return False
 
 def is_ts_capable(tsn):  # tsn's of Tivos that support transport streams
